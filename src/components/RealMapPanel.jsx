@@ -10,6 +10,7 @@ export default function RealMapPanel({
   onLoadStatus
 }) {
   const containerRef = useRef(null);
+  const containerIdRef = useRef(`meetwe-amap-${Math.random().toString(36).slice(2)}`);
   const mapRef = useRef(null);
   const [failed, setFailed] = useState(false);
 
@@ -34,6 +35,7 @@ export default function RealMapPanel({
     }
 
     let disposed = false;
+    let frameId = null;
 
     AMapLoader.load({
       key: jsKey,
@@ -41,71 +43,80 @@ export default function RealMapPanel({
       plugins: ['AMap.Scale', 'AMap.ToolBar']
     })
       .then((AMap) => {
-        if (disposed || !containerRef.current) {
-          return;
-        }
+        frameId = window.requestAnimationFrame(() => {
+          try {
+            const container = containerRef.current;
+            if (disposed || !container || !container.isConnected) {
+              return;
+            }
 
-        containerRef.current.innerHTML = '';
-        const map = new AMap.Map(containerRef.current, {
-          zoom: 12,
-          center: [center.lng, center.lat],
-          features: ['bg', 'road', 'building', 'point'],
-          viewMode: '2D'
+            container.innerHTML = '';
+            const map = new AMap.Map(containerIdRef.current, {
+              zoom: 12,
+              center: [center.lng, center.lat],
+              features: ['bg', 'road', 'building', 'point'],
+              viewMode: '2D'
+            });
+
+            mapRef.current = map;
+            const markers = [];
+
+            participants.forEach((participant) => {
+              if (!participant.location) return;
+              markers.push(
+                new AMap.Marker({
+                  position: [participant.location.lng, participant.location.lat],
+                  title: participant.name,
+                  anchor: 'center',
+                  content: createMarkerContent('person', participant.name || '参与者')
+                })
+              );
+            });
+
+            markers.push(
+              new AMap.Marker({
+                position: [center.lng, center.lat],
+                title: '约会中心',
+                anchor: 'center',
+                content: createMarkerContent('center', '约会中心')
+              })
+            );
+
+            recommendations.slice(0, 8).forEach((place, index) => {
+              if (!place.location) return;
+              markers.push(
+                new AMap.Marker({
+                  position: [place.location.lng, place.location.lat],
+                  title: place.name,
+                  anchor: 'center',
+                  content: createMarkerContent('place', `推荐地点 ${index + 1}`)
+                })
+              );
+            });
+
+            map.add(markers);
+            if (showControls && AMap.Scale) {
+              map.addControl(new AMap.Scale());
+            }
+            if (showControls && AMap.ToolBar) {
+              map.addControl(
+                new AMap.ToolBar({
+                  position: {
+                    right: '10px',
+                    top: '10px'
+                  }
+                })
+              );
+            }
+            map.setFitView(markers, false, [36, 36, 36, 36]);
+            window.setTimeout(() => map.resize(), 120);
+            onLoadStatus?.('ready');
+          } catch (error) {
+            console.warn('AMap JS map load failed:', error);
+            onLoadStatus?.('failed');
+            setFailed(true);
+          }
         });
-
-        mapRef.current = map;
-        const markers = [];
-
-        participants.forEach((participant) => {
-          if (!participant.location) return;
-          markers.push(
-            new AMap.Marker({
-              position: [participant.location.lng, participant.location.lat],
-              title: participant.name,
-              anchor: 'center',
-              content: createMarkerContent('person', participant.name || '参与者')
-            })
-          );
-        });
-
-        markers.push(
-          new AMap.Marker({
-            position: [center.lng, center.lat],
-            title: '约会中心',
-            anchor: 'center',
-            content: createMarkerContent('center', '约会中心')
-          })
-        );
-
-        recommendations.slice(0, 8).forEach((place, index) => {
-          if (!place.location) return;
-          markers.push(
-            new AMap.Marker({
-              position: [place.location.lng, place.location.lat],
-              title: place.name,
-              anchor: 'center',
-              content: createMarkerContent('place', `推荐地点 ${index + 1}`)
-            })
-          );
-        });
-
-        map.add(markers);
-        if (showControls && AMap.Scale) {
-          map.addControl(new AMap.Scale());
-        }
-        if (showControls && AMap.ToolBar) {
-          map.addControl(
-            new AMap.ToolBar({
-              position: {
-                right: '10px',
-                top: '10px'
-              }
-            })
-          );
-        }
-        map.setFitView(markers, false, [36, 36, 36, 36]);
-        window.setTimeout(() => map.resize(), 120);
-        onLoadStatus?.('ready');
       })
       .catch((error) => {
         console.warn('AMap JS map load failed:', error);
@@ -115,6 +126,9 @@ export default function RealMapPanel({
 
     return () => {
       disposed = true;
+      if (frameId) {
+        window.cancelAnimationFrame(frameId);
+      }
       mapRef.current?.destroy();
       mapRef.current = null;
     };
@@ -125,7 +139,8 @@ export default function RealMapPanel({
   }
 
   return (
-    <section
+    <div
+      id={containerIdRef.current}
       className={`real-map-panel ${className}`.trim()}
       ref={containerRef}
       aria-label="高德地图"
